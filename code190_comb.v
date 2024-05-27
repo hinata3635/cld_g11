@@ -17,7 +17,7 @@ module m_top ();
    
   m_proc14 p (r_clk, 1'b1, w_led);
 
-  always@(posedge r_clk) $write("%7d %08x\n", r_cnt, p.Wb_rslt2);
+  always@(posedge r_clk) $write("%7d %08x pc=%d\n", r_cnt, p.Wb_rslt2, p.MeWb_pc[13:2]);
 //  initial begin5
 //     $write("clock: r_pc     IfId_pc  IdEx_pc  ExMe_pc  MeWb_pc : ");
 //     $write("t Id_rrs1  Id_rrs2  Ex_ain   Ex_rslt  Wb_rslt2 w_led\n");
@@ -29,7 +29,6 @@ module m_top ();
   always@(posedge r_clk) if(w_led!=0) $finish;
   initial #50000000 $finish;
 endmodule
-
 /***** main module for FPGA implementation *****/
 /*
 module m_main (w_clk, w_led);
@@ -222,7 +221,8 @@ module m_combiner_addi (w_clk, w_all, w_vb, w_dout, w_addr_out);
   wire [31:0] w_pc  = w_all[63:32];
   wire [31:0] w_imm = w_all[31:0];
   reg [31:0] r_srt = 0;
-  reg [49:0] 	     cm_ram [0:4095]; 
+  reg [17:0] 	     cm_ram [0:4095]; 
+  reg [43:0]         addr_data[0:4095];
   wire [11:0] w_addr = w_pc[13:2];
   integer i;
 
@@ -232,24 +232,30 @@ module m_combiner_addi (w_clk, w_all, w_vb, w_dout, w_addr_out);
     end
   end
 
-  assign #8 w_vb = (w_ir[6:2]==5'b00100 && w_ir[19:15]==w_ir[11:7] && cm_ram[w_addr][49:49]) ? (cm_ram[w_addr][43:32] - w_addr > 2) : 0;
-  assign #8 w_dout = (w_ir[6:2]==5'b00100 && w_ir[19:15]==w_ir[11:7] && cm_ram[w_addr][49:49]) ? cm_ram[w_addr][31:0] : 0;
-  assign #8 w_addr_out = (w_ir[6:2]==5'b00100 && w_ir[19:15]==w_ir[11:7] && cm_ram[w_addr][49:49]) ? cm_ram[w_addr][43:32] : 0;
-
-  always @(posedge w_clk) #5 if (w_ir[6:2]==5'b00100 && w_ir[19:15]==w_ir[11:7] && ~cm_ram[w_addr][49:49]) begin 
-    cm_ram[w_addr][48:44] <= w_all[75:71];
-    cm_ram[w_addr][31:0] <= w_all[31:0];
-    if (w_addr!=0 && cm_ram[w_addr-1][48:44]==w_ir[11:7]) begin 
-    cm_ram[cm_ram[w_addr-1][43:32]][43:32] <= w_all[45:34];
-    cm_ram[cm_ram[w_addr-1][43:32]][31:0] <= cm_ram[cm_ram[w_addr-1][43:32]][31:0] + w_all[31:0];
-    cm_ram[w_addr][49:49] <= 1'b0;
-    cm_ram[w_addr][43:32] <= cm_ram[w_addr-1][43:32];
-    end else begin 
-    cm_ram[w_addr][49:49] <= 1'b1;
-    cm_ram[w_addr][43:32] <= w_all[45:34];
+  initial begin 
+    for (i = 0; i < 4095; i = i + 1) begin
+        addr_data[i] = 0;  
     end
   end
 
-`include "program.txt"
+  assign #8 w_vb = (w_ir[6:2]==5'b00100 && w_ir[19:15]==w_ir[11:7] && cm_ram[w_pc[13:2]][17:17]) ? (addr_data[w_pc[13:2]][43:32] - w_pc[13:2] > 2) : 0;
+  assign #8 w_dout = (w_ir[6:2]==5'b00100 && w_ir[19:15]==w_ir[11:7] && cm_ram[w_pc[13:2]][17:17]) ? addr_data[w_pc[13:2]][31:0] : 0;
+  assign #8 w_addr_out = (w_ir[6:2]==5'b00100 && w_ir[19:15]==w_ir[11:7] && cm_ram[w_pc[13:2]][17:17]) ? addr_data[w_pc[13:2]][43:32] : 0;
+
+  always @(posedge w_clk) #5 if (w_ir[6:2]==5'b00100 && w_ir[19:15]==w_ir[11:7] && ~cm_ram[w_pc[13:2]][17:17]) begin 
+    cm_ram[w_pc[13:2]][16:12] <= w_all[75:71];
+    if (w_pc[13:2]!=0 && cm_ram[w_pc[13:2]-1][16:12]==w_ir[11:7]) begin 
+        addr_data[cm_ram[w_pc[13:2]-1][11:0]][43:32] <= w_all[45:34];
+        addr_data[cm_ram[w_pc[13:2]-1][11:0]][31:0] <= addr_data[cm_ram[w_pc[13:2]-1][11:0]][31:0] + w_all[31:0];
+        cm_ram[w_pc[13:2]][17:17] <= 1'b0;
+        cm_ram[w_pc[13:2]][11:0] <= cm_ram[w_pc[13:2]-1][11:0];
+    end else begin 
+        cm_ram[w_pc[13:2]][17:17] <= 1'b1;
+        cm_ram[w_pc[13:2]][11:0] <= w_all[45:34];
+        addr_data[w_pc[13:2]][43:32] <= w_all[45:34];
+        addr_data[w_pc[13:2]][31:0] <= w_all[31:0];
+    end
+  end
+
 endmodule
 /**************************************************************************/
