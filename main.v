@@ -17,8 +17,8 @@ module m_top ();
    
   m_proc14 p (r_clk, 1'b1, w_led);
 
-  always@(posedge r_clk) $write("%7d %08x %08x\n", 
-                r_cnt, p.Wb_rslt2, p.Wb_rslt2_2);
+  always@(posedge r_clk) $write("%7d %08x %08x %08x\n", 
+                r_cnt, p.Wb_rslt2, p.Wb_rslt2_2, p.w_led);
 //  initial begin
 //     $write("clock: r_pc     IfId_pc  IdEx_pc  ExMe_pc  MeWb_pc : ");
 //     $write("t Id_rrs1  Id_rrs2  Ex_ain   Ex_rslt  Wb_rslt2 w_led\n");
@@ -217,13 +217,13 @@ module m_proc14 (w_clk, w_ce, w_led);
     ExMe_pc   <= IdEx_pc;
     ExMe_ir   <= IdEx_ir;
     ExMe_rslt <= Ex_rslt;
-    ExMe_rrs2 <= IdEx_rrs2;
+    ExMe_rrs2 <= Ex_ain2;
     ExMe_rd   <= IdEx_rd;
     // 2本目
     ExMe_pc_2   <= (Ex_taken || Ex_taken_br) ? 0 : IdEx_pc_2;
     ExMe_ir_2   <= (Ex_taken || Ex_taken_br) ? {25'd0, 7'b0010011} : IdEx_ir_2;
     ExMe_rslt_2 <= Ex_rslt_2;
-    ExMe_rrs2_2 <= IdEx_rrs2_2;
+    ExMe_rrs2_2 <= Ex_ain2_2;
     ExMe_rd_2   <= (Ex_taken || Ex_taken_br) ? 0 : IdEx_rd_2;
   end
   /*********************** Me stage *********************************/
@@ -314,20 +314,26 @@ module m_inst_dep_ss (w_addr, r_vb, w_dout, w_dout_2); // 命令列をフェッ�
   wire [4:0] w_rs2_2 = cm_ram[w_addr+1][24:20];
   wire [4:0] w_rd_2 = cm_ram[w_addr+1][11:7];
 
-  always @(*) #5 case (w_op[4:3])
-    2'b00: case (w_op_2[4:3])
-      // 1本目がI-typeのとき
+  always @(*) #5 case (w_op[4:2])
+    3'b001: case (w_op_2[4:3])
+      // 1本目がaddiのとき
       2'b00: r_vb <= (w_rd!=w_rs1_2 & w_rd!=w_rd_2 & w_rs1!=w_rd_2);
       2'b01: r_vb <= (w_rd!=w_rs1_2 & w_rd!=w_rs2_2 & w_rd!=w_rd_2 & w_rs1!=w_rd_2);
       default: r_vb <= (w_rd!=w_rs1_2 & w_rd!=w_rs2_2);
     endcase
-    2'b01: case (w_op_2[4:3])
+    3'b000: case (w_op_2[4:3])
+      // 1本目がlwのとき
+      2'b00: r_vb <= (w_rd!=w_rs1_2 & w_rd!=w_rd_2 & w_rs1!=w_rd_2);
+      2'b01: r_vb <= (w_rd!=w_rs1_2 & w_rd!=w_rs2_2 & w_rd!=w_rd_2 & w_rs1!=w_rd_2);
+      default: r_vb <= (w_rd!=w_rs1_2 & w_rd!=w_rs2_2);
+    endcase
+    3'b011: case (w_op_2[4:3])
       // 1本目がR-typeのとき
       2'b00: r_vb <= (w_rd!=w_rs1_2 & w_rd!=w_rd_2 & w_rs1!=w_rd_2 & w_rs2!=w_rd_2);
       2'b01: r_vb <= (w_rd!=w_rs1_2 & w_rd!=w_rs2_2 & w_rd!=w_rd_2 & w_rs1!=w_rd_2 & w_rs2!=w_rd_2);
       default: r_vb <= (w_rd!=w_rs1_2 & w_rd!=w_rs2_2);
     endcase
-    2'b01: case (w_op_2[4:2])
+    3'b010: case (w_op_2[4:2])
       // 1本目がS-typeのとき
       3'b010: r_vb <= 1'b0; // sw
       3'b000: r_vb <= 1'b0; // lw
@@ -400,8 +406,6 @@ module m_br_address (w_clk, IfId_pc, IfId_pc_2, IfId_ir, IfId_ir_2, Ex_taken, Ex
   end
 
   always @(posedge w_clk) begin 
-    // addr_ram[IfId_pc[13:2]] <= 13'b0;
-    // addr_ram[IfId_pc[13:2]+1] <= 13'b0;
     if (Ex_BNE) begin 
       addr_ram[IdEx_pc[13:2]] <= {1'b1, IdEx_tpc[13:2]};
     end else if (Ex_BNE_2) begin 
