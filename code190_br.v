@@ -83,7 +83,8 @@ module m_proc14 (w_clk, w_ce, w_led);
   
   /*********************** IF stage *********************************/
   wire [31:0] If_ir;
-  m_amemory m_imem (w_clk, r_pc[13:2], 1'd0, 32'd0, If_ir);
+  wire [11:0] w_addr = (w_vb) ? w_addr_br : r_pc[13:2];
+  m_amemory m_imem (w_clk, w_addr, 1'd0, 32'd0, If_ir);
 
   always @(posedge w_clk) #5 if(w_ce) begin
       if (Ex_taken || Ex_taken_br) begin
@@ -93,10 +94,8 @@ module m_proc14 (w_clk, w_ce, w_led);
       end else begin
           IfId_pc <= r_pc;
       end
-      IfId_ir <= (Ex_taken || Ex_taken_br) ? {25'd0, 7'b0010011} : (w_vb) ? w_ir_br : If_ir;
+      IfId_ir <= (Ex_taken || Ex_taken_br) ? {25'd0, 7'b0010011} : If_ir;
   end
-
-
 
   /*********************** ID stage *********************************/
   wire [4:0] Id_op5 = IfId_ir[6:2];
