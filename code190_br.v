@@ -67,6 +67,7 @@ module m_proc14 (w_clk, w_ce, w_led);
   reg [31:0] IdEx_rrs2 = 0;   
   reg [31:0] IdEx_imm  = 0;
   reg [4:0]  IdEx_rd   = 0;
+  reg [0:0]  IdEx_vb_br = 0;
 
   reg [31:0] ExMe_pc   = 0; // ExMe pipeline registers
   reg [31:0] ExMe_ir   = 0;
@@ -82,19 +83,17 @@ module m_proc14 (w_clk, w_ce, w_led);
   
   /*********************** IF stage *********************************/
   wire [31:0] If_ir;
-  wire [11:0] pc_mux;
-  assign pc_mux = w_vb ? w_addr : r_pc[13:2];
-  m_amemory m_imem (w_clk, pc_mux, 1'd0, 32'd0, If_ir);
+  m_amemory m_imem (w_clk, r_pc[13:2], 1'd0, 32'd0, If_ir);
 
   always @(posedge w_clk) #5 if(w_ce) begin
-      if (Ex_taken) begin
+      if (Ex_taken || Ex_taken_br) begin
           IfId_pc <= 0;
       end else if (w_vb) begin
-          IfId_pc <= {w_addr, 2'b00};
+          IfId_pc <= {18'b0, w_addr_br, 2'b00};
       end else begin
-          IfId_pc <= IdEx_pc + 4;
+          IfId_pc <= r_pc;
       end
-      IfId_ir <= (Ex_taken) ? {25'd0, 7'b0010011} : If_ir;
+      IfId_ir <= (Ex_taken || Ex_taken_br) ? {25'd0, 7'b0010011} : (w_vb) ? w_ir_br : If_ir;
   end
 
 
@@ -109,18 +108,20 @@ module m_proc14 (w_clk, w_ce, w_led);
   m_immgen m_immgen0 (IfId_ir, Id_imm);
   m_rf_bypass m_regs (w_clk, Id_rs1, Id_rs2, MeWb_rd, 1'b1, Wb_rslt2, Id_rrs1, Id_rrs2);
 
-  wire [12:0] w_addr;
-  wire w_vb;
-  m_br_address m_addr (w_clk, IfId_pc[13:2], IfId_ir, Ex_taken, IdEx_pc[13:2], IdEx_tpc[12:0], Id_op5, Ex_op5, w_addr, w_vb);
+  wire [11:0] w_addr_br;
+  wire [31:0] w_ir_br;
+  wire [0:0] w_vb;
+  m_br_address m_addr (w_clk, IfId_pc, IfId_ir, Ex_taken, IdEx_pc, IdEx_tpc, Id_op5, Ex_BNE, w_addr_br, w_ir_br, w_vb);
 
   always @(posedge w_clk) #5 if(w_ce) begin
-    IdEx_pc   <= (Ex_taken) ? 0 : IfId_pc;
-    IdEx_ir   <= (Ex_taken) ? {25'd0, 7'b0010011} : IfId_ir;
+    IdEx_pc   <= (Ex_taken || Ex_taken_br) ? 0 : IfId_pc;
+    IdEx_ir   <= (Ex_taken || Ex_taken_br) ? {25'd0, 7'b0010011} : IfId_ir;
     IdEx_tpc  <= IfId_pc + Id_imm;
     IdEx_imm  <= Id_imm;
     IdEx_rrs1 <= Id_rrs1;
     IdEx_rrs2 <= Id_rrs2;
-    IdEx_rd   <= (Id_we==0 || Ex_taken) ? 0 : Id_rd; // Note
+    IdEx_rd   <= (Id_we==0 || Ex_taken || Ex_taken_br) ? 0 : Id_rd; // Note
+    IdEx_vb_br <= w_vb;
   end
   /*********************** Ex stage *********************************/
   wire [4:0] Ex_op5 = IdEx_ir[6:2];
@@ -135,7 +136,8 @@ module m_proc14 (w_clk, w_ce, w_led);
   wire [31:0] Ex_ain = (Ex_op5==5'b01100 || Ex_op5==5'b11000) ? Ex_ain2 : IdEx_imm; // 5/23
   wire [31:0] Ex_rslt = (Ex_SLL) ? Ex_ain1 << Ex_ain[4:0] : // 5/23
                         (Ex_SRL) ? Ex_ain1 >> Ex_ain[4:0] : Ex_ain1 + Ex_ain; // 5/23
-  wire Ex_taken = (Ex_BEQ & Ex_ain1==Ex_ain) || (Ex_BNE & Ex_ain1!=Ex_ain); // 5/23
+  wire Ex_taken = (Ex_BEQ & Ex_ain1==Ex_ain) || (Ex_BNE & Ex_ain1!=Ex_ain & ~IdEx_vb_br); // 5/23
+  wire Ex_taken_br = (Ex_BNE & Ex_ain1==Ex_ain & IdEx_vb_br);
   always @(posedge w_clk) #5 if(w_ce) begin
     ExMe_pc   <= IdEx_pc;
     ExMe_ir   <= IdEx_ir;
@@ -163,7 +165,7 @@ module m_proc14 (w_clk, w_ce, w_led);
   wire       Wb_we = (Wb_op5==5'b01100 || Wb_op5==5'b00100 || Wb_op5==5'b00000); // 5/23
   wire [31:0] Wb_rslt2 = (Wb_LW) ? MeWb_ldd : MeWb_rslt;
   always @(posedge w_clk) #5
-    if(w_ce && IfId_ir!=32'h000f0033) r_pc <= (Ex_taken) ? IdEx_tpc : r_pc+4;
+    if(w_ce && IfId_ir!=32'h000f0033) r_pc <= (Ex_taken) ? IdEx_tpc : (Ex_taken_br) ? IdEx_pc+4 : (w_vb) ? {18'b0, w_addr_br, 2'b00}+4 : r_pc+4;
    
   reg [31:0] r_led = 0;
   always @(posedge w_clk) if(w_ce & MeWb_rd==30) r_led <= Wb_rslt2;
@@ -223,38 +225,37 @@ module m_rf_bypass (w_clk, w_rr1, w_rr2, w_wr, w_we, w_wdata, w_rdata1, w_rdata2
    always @(posedge w_clk) if(w_we) r[w_wr] <= w_wdata;
 endmodule
 /**************************************************************************/
-module m_br_address (w_clk, IfId_pc, IfId_ir, Ex_taken, IdEx_pc, IdEx_tpc, Id_op5, Ex_op5, w_addr, w_vb);
+module m_br_address (w_clk, IfId_pc, IfId_ir, Ex_taken, IdEx_pc, IdEx_tpc, Id_op5, Ex_BNE, w_addr, w_ir_br, w_vb);
   input  wire w_clk;
-  input  wire [11:0] IfId_pc;
+  input  wire [31:0] IfId_pc;
   input  wire [31:0] IfId_ir;
   input  wire Ex_taken;
-  input  wire [11:0] IdEx_pc;
-  input  wire [12:0] IdEx_tpc;
+  input  wire [31:0] IdEx_pc;
+  input  wire [31:0] IdEx_tpc;
   input  wire [4:0]  Id_op5;
-  input  wire [4:0]  Ex_op5;
-  output wire [12:0] w_addr;
+  input  wire [0:0]  Ex_BNE;
+  output wire [11:0] w_addr;
+  output wire [31:0] w_ir_br;
   output wire w_vb;
 
-  reg [13:0] addr_ram [0:4095]; // 13-bit address RAM with MSB as valid bit
+  reg [12:0] addr_ram [0:4095]; // 13-bit address RAM with MSB as valid bit
+  reg [31:0] cm_ram [0:4095]; // 4K word (4096 x 32bit) memory
   integer i;
-
   initial begin
-    for (i = 0; i < 4096; i = i + 1) begin
-      addr_ram[i] = 14'd0;
+      for(i = 0; i < 4096; i = i + 1) addr_ram[i] = 0;
+  end
+
+  always @(posedge w_clk) begin 
+    // addr_ram[IfId_pc[13:2]] <= 13'b0;
+    // addr_ram[IfId_pc[13:2]+1] <= 13'b0;
+    if (Ex_BNE) begin 
+      addr_ram[IdEx_pc[13:2]] <= {1'b1, IdEx_tpc[13:2]};
     end
   end
 
-  always @(posedge w_clk) begin
-    if (Ex_op5 == 5'b11100) begin // BNE instruction
-      if (addr_ram[IdEx_pc[13:2]][12:0] == IdEx_tpc) begin
-        addr_ram[IdEx_pc[13:2]] <= {1'b0, addr_ram[IdEx_pc[13:2]][12:0]};
-      end else begin
-        addr_ram[IdEx_pc[13:2]] <= {1'b1, IdEx_tpc};
-      end
-    end
-  end
-
-  assign w_vb = (Id_op5 == 5'b11100 && IfId_pc == IdEx_pc) ? 1'b1 : 1'b0;
-  assign w_addr = (Id_op5 == 5'b11100) ? addr_ram[IfId_pc[13:2]][12:0] : 13'b0;
+  assign #10 w_vb = (Id_op5 == 5'b11000) ? addr_ram[IfId_pc[13:2]][12:12] : 1'b0;
+  assign #10 w_addr = (Id_op5 == 5'b11000) ? addr_ram[IfId_pc[13:2]][11:0] : 12'b0;
+  assign #10 w_ir_br = cm_ram[w_addr];
+`include "program.txt"
 endmodule
 /**************************************************************************/
